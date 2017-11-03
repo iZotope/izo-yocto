@@ -1,0 +1,9 @@
+[submodule "sources/meta-fsl-arm"]
+	path = sources/meta-fsl-arm
+	url = https://github.com/iZotope/meta-fsl-arm.git
+[submodule "sources/meta-openembedded"]
+	path = sources/meta-openembedded
+	url = https://github.com/iZotope/meta-openembedded.git
+[submodule "sources/poky"]
+	path = sources/poky
+	url = https://github.com/iZotope/poky.git

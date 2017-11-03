@@ -1,0 +1,64 @@
+#!/usr/bin/lua
+-- Copyright (C) 2017, iZotope, Inc. All Rights Reserved
+-- Released under the BSD-3 license (see COPYING.BSD-3)
+
+posix = require 'posix'
+posix.time = require 'posix.time'
+
+izo = require 'izo'
+Gpio = require 'izo.gpio'.Gpio
+
+function p(msg)
+	print("R1-Audio: "..msg)
+end
+
+function make_gpio(tab, gpio_name, state)
+	tab[gpio_name] = Gpio(gpio_name, state)
+	if not tab[gpio_name].valid then
+		p("failed to setup GPIO: "..gpio_name)
+		os.exit(1)
+	end
+end
+
+gpios = {}
+make_gpio(gpios, 'headphone_mute', Gpio.DIRECTION.output, true)
+make_gpio(gpios, 'audio_power_en', Gpio.DIRECTION.output, false)
+make_gpio(gpios, 'mclk_sel0', Gpio.DIRECTION.output, false)
+make_gpio(gpios, 'mclk_sel1', Gpio.DIRECTION.output, false)
+make_gpio(gpios, 'audio_power_ok', Gpio.DIRECTION.input)
+
+p("Setting up gamut rev1 audio system.... ")
+
+p("Turning on PMIC SWBST to 5.15V")
+if not os.execute('i2cset -f -y 0 0x08 0x66 0x0b') then
+	p ("couldn't set pmic SWBST to 5.15v")
+	os.exit(1)
+end
+
+-- set the mclk to 24.xxxMHz
+gpios.mclk_sel0:set_active(true)
+gpios.mclk_sel1:set_active(true)
+
+-- enable the power
+gpios.audio_power_en:set_active(true)
+
+p("Waiting for audio to come up...")
+
+-- wait up to 500 mS for audio power to come up
+power_success = false
+for i=1,50 do
+	if gpios.audio_power_ok:is_active() then
+		power_success = true
+		break
+	end
+	posix.time.nanosleep{tv_nsec=10e6} -- 10ms
+end
+
+if power_success then
+	p("Audio power good, unmuting headphones!")
+	gpios.headphone_mute:set_active(false)
+else
+	p("Error: audio power not detected, disabing power")
+	gpios.audio_power_en:set_active(false)
+	os.exit(1)
+end

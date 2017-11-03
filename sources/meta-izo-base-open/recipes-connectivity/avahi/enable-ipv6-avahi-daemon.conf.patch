@@ -1,0 +1,11 @@
+--- avahi-0.6.31.orig/avahi-daemon/avahi-daemon.conf	2016-07-14 08:29:42.381188093 -0700
++++ avahi-0.6.31/avahi-daemon/avahi-daemon.conf	2016-07-14 08:30:14.417877941 -0700
+@@ -23,7 +23,7 @@
+ #domain-name=local
+ browse-domains=0pointer.de, zeroconf.org
+ use-ipv4=yes
+-use-ipv6=no
++use-ipv6=yes
+ #allow-interfaces=eth0
+ #deny-interfaces=eth1
+ #check-response-ttl=no

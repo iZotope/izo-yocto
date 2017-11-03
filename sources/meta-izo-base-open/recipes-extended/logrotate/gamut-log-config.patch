@@ -1,0 +1,90 @@
+From e387e5fd75d2b5a5fab1627990bf11132f2c30d2 Mon Sep 17 00:00:00 2001
+From: Sam Baxter <sbaxter@izotope.com>
+Date: Tue, 17 May 2016 15:09:57 -0400
+Subject: [PATCH] Customize logrotate spec and conf to install hourly cron job
+ with gamut log config
+
+---
+ examples/logrotate-default | 16 +++++++---------
+ logrotate.spec             | 12 ++++++------
+ 2 files changed, 13 insertions(+), 15 deletions(-)
+
+diff --git a/examples/logrotate-default b/examples/logrotate-default
+index 56e9103..e877c10 100644
+--- a/examples/logrotate-default
++++ b/examples/logrotate-default
+@@ -1,19 +1,13 @@
+ # see "man logrotate" for details
+-# rotate log files weekly
+-weekly
++# rotate log files hourly
++hourly
+ 
+-# keep 4 weeks worth of backlogs
++# keep 4 hours worth of backlogs
+ rotate 4
+ 
+ # create new (empty) log files after rotating old ones
+ create
+ 
+-# use date as a suffix of the rotated file
+-dateext
+-
+-# uncomment this if you want your log files compressed
+-#compress
+-
+ # RPM packages drop log rotation information into this directory
+ include /etc/logrotate.d
+ 
+@@ -33,3 +27,7 @@ include /etc/logrotate.d
+ }
+ 
+ # system-specific logs may be also be configured here.
++/var/log/gamut.log {
++    rotate 1
++    size 100k
++}
+\ No newline at end of file
+diff --git a/logrotate.spec b/logrotate.spec
+index 0c3f255..8daa2a6 100644
+--- a/logrotate.spec
++++ b/logrotate.spec
+@@ -13,9 +13,9 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
+ The logrotate utility is designed to simplify the administration of
+ log files on a system which generates a lot of log files.  Logrotate
+ allows for the automatic rotation compression, removal and mailing of
+-log files.  Logrotate can be set to handle a log file daily, weekly,
+-monthly or when the log file gets to a certain size.  Normally,
+-logrotate runs as a daily cron job.
++log files.  Logrotate can be set to handle a log file hourly, daily,
++weekly, monthly or when the log file gets to a certain size.  Normally,
++logrotate runs as an hourly cron job.
+ 
+ Install the logrotate package if you need a utility to deal with the
+ log files on your system.
+@@ -30,11 +30,11 @@ make %{?_smp_mflags} RPM_OPT_FLAGS="$RPM_OPT_FLAGS" WITH_SELINUX=yes
+ rm -rf $RPM_BUILD_ROOT
+ make PREFIX=$RPM_BUILD_ROOT MANDIR=%{_mandir} install
+ mkdir -p $RPM_BUILD_ROOT/%{_sysconfdir}/logrotate.d
+-mkdir -p $RPM_BUILD_ROOT/%{_sysconfdir}/cron.daily
++mkdir -p $RPM_BUILD_ROOT/%{_sysconfdir}/cron.hourly
+ mkdir -p $RPM_BUILD_ROOT/%{_localstatedir}/lib
+ 
+ install -p -m 644 examples/logrotate-default $RPM_BUILD_ROOT/%{_sysconfdir}/logrotate.conf
+-install -p -m 755 examples/logrotate.cron $RPM_BUILD_ROOT/%{_sysconfdir}/cron.daily/logrotate
++install -p -m 755 examples/logrotate.cron $RPM_BUILD_ROOT/%{_sysconfdir}/cron.hourly/logrotate
+ touch $RPM_BUILD_ROOT/%{_localstatedir}/lib/logrotate.status
+ 
+ %clean
+@@ -46,7 +46,7 @@ rm -rf $RPM_BUILD_ROOT
+ %attr(0755, root, root) %{_sbindir}/logrotate
+ %attr(0644, root, root) %{_mandir}/man8/logrotate.8*
+ %attr(0644, root, root) %{_mandir}/man5/logrotate.conf.5*
+-%attr(0755, root, root) %{_sysconfdir}/cron.daily/logrotate
++%attr(0755, root, root) %{_sysconfdir}/cron.hourly/logrotate
+ %attr(0644, root, root) %config(noreplace) %{_sysconfdir}/logrotate.conf
+ %attr(0755, root, root) %dir %{_sysconfdir}/logrotate.d
+ %attr(0644, root, root) %verify(not size md5 mtime) %config(noreplace) %{_localstatedir}/lib/logrotate.status
+-- 
+2.5.0
+

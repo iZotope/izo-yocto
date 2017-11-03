@@ -1,0 +1,276 @@
+commit c4be264168ee2f6c38b6b9b3db0a166441be478b
+Author: Pedro Alves <palves@redhat.com>
+Date:   Sat Nov 28 16:39:31 2015 +0000
+
+    PR other/61321 - demangler crash on casts in template parameters
+    
+    The fix for bug 59195:
+    
+     [C++ demangler handles conversion operator incorrectly]
+     https://gcc.gnu.org/bugzilla/show_bug.cgi?id=59195
+    
+    unfortunately makes the demangler crash due to infinite recursion, in
+    case of casts in template parameters.
+    
+    For example, with:
+    
+     template<int> struct A {};
+     template <typename Y> void function_temp(A<sizeof ((Y)(999))>) {}
+     template void function_temp<int>(A<sizeof (int)>);
+    
+    The 'function_temp<int>' instantiation above mangles to:
+    
+      _Z13function_tempIiEv1AIXszcvT_Li999EEE
+    
+    The demangler parses this as:
+    
+    typed name
+      template
+        name 'function_temp'
+        template argument list
+          builtin type int
+      function type
+        builtin type void
+        argument list
+          template                          (*)
+            name 'A'
+            template argument list
+              unary operator
+                operator sizeof
+                unary operator
+                  cast
+                    template parameter 0    (**)
+                  literal
+                    builtin type int
+                    name '999'
+    
+    And after the fix for 59195, due to:
+    
+     static void
+     d_print_cast (struct d_print_info *dpi, int options,
+    	       const struct demangle_component *dc)
+     {
+     ...
+       /* For a cast operator, we need the template parameters from
+          the enclosing template in scope for processing the type.  */
+       if (dpi->current_template != NULL)
+         {
+           dpt.next = dpi->templates;
+           dpi->templates = &dpt;
+           dpt.template_decl = dpi->current_template;
+         }
+    
+    when printing the template argument list of A (what should be "<sizeof
+    (int)>"), the template parameter 0 (that is, "T_", the '**' above) now
+    refers to the first parameter of the the template argument list of the
+    'A' template (the '*' above), exactly what we were already trying to
+    print.  This leads to infinite recursion, and stack exaustion.  The
+    template parameter 0 should actually refer to the first parameter of
+    the 'function_temp' template.
+    
+    Where it reads "for the cast operator" in the comment in d_print_cast
+    (above), it's really talking about a conversion operator, like:
+    
+      struct A { template <typename U> explicit operator U(); };
+    
+    We don't want to inject the template parameters from the enclosing
+    template in scope when processing a cast _expression_, only when
+    handling a conversion operator.
+    
+    The problem is that DEMANGLE_COMPONENT_CAST is currently ambiguous,
+    and means _both_ 'conversion operator' and 'cast expression'.
+    
+    Fix this by adding a new DEMANGLE_COMPONENT_CONVERSION component type,
+    which does what DEMANGLE_COMPONENT_CAST does today, and making
+    DEMANGLE_COMPONENT_CAST just simply print its component subtree.
+    
+    I think we could instead reuse DEMANGLE_COMPONENT_CAST and in
+    d_print_comp_inner still do:
+    
+     @@ -5001,9 +5013,9 @@ d_print_comp_inner (struct d_print_info *dpi, int options,
+            d_print_comp (dpi, options, dc->u.s_extended_operator.name);
+            return;
+    
+         case DEMANGLE_COMPONENT_CAST:
+           d_append_string (dpi, "operator ");
+     -     d_print_cast (dpi, options, dc);
+     +     d_print_conversion (dpi, options, dc);
+           return;
+    
+    leaving the unary cast case below calling d_print_cast, but seems to
+    me that spliting the component types makes it easier to reason about
+    the code.
+    
+    g++'s testsuite actually generates three symbols that crash the
+    demangler in the same way.  I've added those as tests in the demangler
+    testsuite as well.
+    
+    And then this fixes PR other/61233 too, which happens to be a
+    demangler crash originally reported to GDB, at:
+    https://sourceware.org/bugzilla/show_bug.cgi?id=16957
+    
+    Bootstrapped and regtested on x86_64 Fedora 20.
+    
+    Also ran this through GDB's testsuite.  GDB will require a small
+    update to use DEMANGLE_COMPONENT_CONVERSION in one place it's using
+    DEMANGLE_COMPONENT_CAST in its sources.
+    
+    libiberty/
+    2015-11-27  Pedro Alves  <palves@redhat.com>
+    
+            PR other/61321
+            PR other/61233
+            * demangle.h (enum demangle_component_type)
+            <DEMANGLE_COMPONENT_CONVERSION>: New value.
+            * cp-demangle.c (d_demangle_callback, d_make_comp): Handle
+            DEMANGLE_COMPONENT_CONVERSION.
+            (is_ctor_dtor_or_conversion): Handle DEMANGLE_COMPONENT_CONVERSION
+            instead of DEMANGLE_COMPONENT_CAST.
+            (d_operator_name): Return a DEMANGLE_COMPONENT_CONVERSION
+            component if handling a conversion.
+            (d_count_templates_scopes, d_print_comp_inner): Handle
+            DEMANGLE_COMPONENT_CONVERSION.
+            (d_print_comp_inner): Handle DEMANGLE_COMPONENT_CONVERSION instead
+            of DEMANGLE_COMPONENT_CAST.
+            (d_print_cast): Rename as ...
+            (d_print_conversion): ... this.  Adjust comments.
+            (d_print_cast): Rewrite - simply print the left subcomponent.
+            * cp-demint.c (cplus_demangle_fill_component): Handle
+            DEMANGLE_COMPONENT_CONVERSION.
+    
+            * testsuite/demangle-expected: Add tests.
+    
+    git-svn-id: svn+ssh://gcc.gnu.org/svn/gcc/trunk@231020 138bc75d-0d04-0410-961f-82ee72b054a4
+
+diff --git a/include/demangle.h b/include/demangle.h
+index f4c4121..1d7cadf 100644
+--- a/include/demangle.h
++++ b/include/demangle.h
+@@ -379,6 +379,10 @@ enum demangle_component_type
+   /* A typecast, represented as a unary operator.  The one subtree is
+      the type to which the argument should be cast.  */
+   DEMANGLE_COMPONENT_CAST,
++  /* A conversion operator, represented as a unary operator.  The one
++     subtree is the type to which the argument should be converted
++     to.  */
++  DEMANGLE_COMPONENT_CONVERSION,
+   /* A nullary expression.  The left subtree is the operator.  */
+   DEMANGLE_COMPONENT_NULLARY,
+   /* A unary expression.  The left subtree is the operator, and the
+diff --git a/libiberty/cp-demangle.c b/libiberty/cp-demangle.c
+index ff608a3..bd64bef 100644
+--- a/libiberty/cp-demangle.c
++++ b/libiberty/cp-demangle.c
+@@ -542,8 +542,10 @@ d_print_array_type (struct d_print_info *, int,
+ static void
+ d_print_expr_op (struct d_print_info *, int, const struct demangle_component *);
+ 
+-static void
+-d_print_cast (struct d_print_info *, int, const struct demangle_component *);
++static void d_print_cast (struct d_print_info *, int,
++			  const struct demangle_component *);
++static void d_print_conversion (struct d_print_info *, int,
++				const struct demangle_component *);
+ 
+ static int d_demangle_callback (const char *, int,
+                                 demangle_callbackref, void *);
+@@ -736,6 +738,9 @@ d_dump (struct demangle_component *dc, int indent)
+     case DEMANGLE_COMPONENT_CAST:
+       printf ("cast\n");
+       break;
++    case DEMANGLE_COMPONENT_CONVERSION:
++      printf ("conversion operator\n");
++      break;
+     case DEMANGLE_COMPONENT_NULLARY:
+       printf ("nullary operator\n");
+       break;
+@@ -945,6 +950,7 @@ d_make_comp (struct d_info *di, enum demangle_component_type type,
+     case DEMANGLE_COMPONENT_IMAGINARY:
+     case DEMANGLE_COMPONENT_VENDOR_TYPE:
+     case DEMANGLE_COMPONENT_CAST:
++    case DEMANGLE_COMPONENT_CONVERSION:
+     case DEMANGLE_COMPONENT_JAVA_RESOURCE:
+     case DEMANGLE_COMPONENT_DECLTYPE:
+     case DEMANGLE_COMPONENT_PACK_EXPANSION:
+@@ -1238,7 +1244,7 @@ is_ctor_dtor_or_conversion (struct demangle_component *dc)
+       return is_ctor_dtor_or_conversion (d_right (dc));
+     case DEMANGLE_COMPONENT_CTOR:
+     case DEMANGLE_COMPONENT_DTOR:
+-    case DEMANGLE_COMPONENT_CAST:
++    case DEMANGLE_COMPONENT_CONVERSION:
+       return 1;
+     }
+ }
+@@ -1804,11 +1810,16 @@ d_operator_name (struct d_info *di)
+     {
+       struct demangle_component *type;
+       int was_conversion = di->is_conversion;
++      struct demangle_component *res;
+ 
+       di->is_conversion = ! di->is_expression;
+       type = cplus_demangle_type (di);
++      if (di->is_conversion)
++	res = d_make_comp (di, DEMANGLE_COMPONENT_CONVERSION, type, NULL);
++      else
++	res = d_make_comp (di, DEMANGLE_COMPONENT_CAST, type, NULL);
+       di->is_conversion = was_conversion;
+-      return d_make_comp (di, DEMANGLE_COMPONENT_CAST, type, NULL);
++      return res;
+     }
+   else
+     {
+@@ -3928,6 +3939,7 @@ d_count_templates_scopes (int *num_templates, int *num_scopes,
+     case DEMANGLE_COMPONENT_TEMPLATE_ARGLIST:
+     case DEMANGLE_COMPONENT_INITIALIZER_LIST:
+     case DEMANGLE_COMPONENT_CAST:
++    case DEMANGLE_COMPONENT_CONVERSION:
+     case DEMANGLE_COMPONENT_NULLARY:
+     case DEMANGLE_COMPONENT_UNARY:
+     case DEMANGLE_COMPONENT_BINARY:
+@@ -5064,9 +5076,9 @@ d_print_comp_inner (struct d_print_info *dpi, int options,
+       d_print_comp (dpi, options, dc->u.s_extended_operator.name);
+       return;
+ 
+-    case DEMANGLE_COMPONENT_CAST:
++    case DEMANGLE_COMPONENT_CONVERSION:
+       d_append_string (dpi, "operator ");
+-      d_print_cast (dpi, options, dc);
++      d_print_conversion (dpi, options, dc);
+       return;
+ 
+     case DEMANGLE_COMPONENT_NULLARY:
+@@ -5805,11 +5817,20 @@ d_print_expr_op (struct d_print_info *dpi, int options,
+ 
+ static void
+ d_print_cast (struct d_print_info *dpi, int options,
+-              const struct demangle_component *dc)
++		    const struct demangle_component *dc)
++{
++  d_print_comp (dpi, options, d_left (dc));
++}
++
++/* Print a conversion operator.  */
++
++static void
++d_print_conversion (struct d_print_info *dpi, int options,
++		    const struct demangle_component *dc)
+ {
+   struct d_print_template dpt;
+ 
+-  /* For a cast operator, we need the template parameters from
++  /* For a conversion operator, we need the template parameters from
+      the enclosing template in scope for processing the type.  */
+   if (dpi->current_template != NULL)
+     {
+diff --git a/libiberty/cp-demint.c b/libiberty/cp-demint.c
+index 1d1a77a..efcc5b7 100644
+--- a/libiberty/cp-demint.c
++++ b/libiberty/cp-demint.c
+@@ -110,6 +110,7 @@ cplus_demangle_fill_component (struct demangle_component *p,
+     case DEMANGLE_COMPONENT_IMAGINARY:
+     case DEMANGLE_COMPONENT_VENDOR_TYPE:
+     case DEMANGLE_COMPONENT_CAST:
++    case DEMANGLE_COMPONENT_CONVERSION:
+       if (right != NULL)
+ 	return 0;
+       break;

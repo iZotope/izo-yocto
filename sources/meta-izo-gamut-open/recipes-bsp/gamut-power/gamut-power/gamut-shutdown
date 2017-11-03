@@ -1,0 +1,9 @@
+#!/bin/sh
+# Copyright (C) 2017, iZotope, Inc. All Rights Reserved
+# Released under the BSD-3 license (see COPYING.BSD-3)
+
+DAEMON=/usr/sbin/gamut-boot
+
+echo "Shutting down..."
+
+/usr/sbin/start-stop-daemon -S --background -x $DAEMON -- shutdown

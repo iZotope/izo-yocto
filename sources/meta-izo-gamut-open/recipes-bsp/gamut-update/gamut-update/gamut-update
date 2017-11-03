@@ -1,0 +1,403 @@
+#!/bin/bash
+# Copyright (C) 2017, iZotope, Inc. All Rights Reserved
+# Released under the BSD-3 license (see COPYING.BSD-3)
+
+# general things
+EXENAME=$(basename $0)
+TMPDIR=""
+
+# update paths and the such
+UPDATE_MNT="/tmp/update"
+ROOTFS_MNT=$UPDATE_MNT/rootfs
+BOOT_MNT=$UPDATE_MNT/boot
+
+function usage() {
+	cat <<EOF
+$EXENAME - update gamut firmware
+usage:
+$EXENAME [command] [options]....
+
+common flags:
+	-v n
+		set verbosity to n, 1 by default
+
+$EXENAME install
+	-f file
+		use 'file' as the update file
+	-h
+		don't run integrigy check on contents of update file
+
+EOF
+}
+
+### If TMPDIR isn't set this will create a tmp dir
+function make_tmpdir() {
+	if [[ ! -d $TMPDIR ]]; then
+		TMPDIR=$(mktemp -d)
+	fi
+}
+
+### Checks an update bundle for integrity
+# $1 - filename of update bundle to check
+#
+function verify_update () {
+	UPDATE_FILE=$1
+	make_tmpdir
+
+	### Verify integrity of the update file
+	# extract the md5sum file
+	tar xf $UPDATE_FILE -C $TMPDIR ./sha256
+	if [[ $? -ne 0 ]]; then
+		echo "Error: couldn't find sha256 in update bundle. Err '$?'"
+		return 1
+	fi
+
+	# get a list of files excluding the './' and './sha256'
+	FILES=$(tar tf $UPDATE_FILE|sed -e '/^\.\/$/d' -e '/^\.\/sha256/d')
+	for F in $FILES; do
+		# get the sha256sum of the file in the update bundle
+		echo -n "$F..."
+		SHA="$(tar xOf $UPDATE_FILE $F|sha256sum|sed 's/\s*-//')"
+		if ! grep -q "$SHA\s\+$F" $TMPDIR/sha256; then
+			echo "Error: mismatched checksum on $F. Err '$?'"
+			return 1;
+		fi
+		echo "Okay!"
+	done
+
+	return 0
+}
+
+### Mounts the update partition
+# $1 - device to mount
+# $2 - folder to mount on
+function mount_update () {
+	TARGET_PART=$1
+	TARGET_MNT=$2
+
+	echo "Mounting $TARGET_PART to $TARGET_MNT..."
+
+	### Get the target partition mounted
+	# make sure the update mount point exists
+	mkdir -p $TARGET_MNT
+	# check if somthing is mounted there and unmount
+	if mountpoint -q $TARGET_MNT; then
+		if ! umount $TARGET_MNT; then
+			echo "Error: couldn't unmount $TARGET_MNT. Err '$?'"
+			return 1
+		fi
+	fi
+	mount $TARGET_PART $TARGET_MNT
+	if [[ $? -ne 0 ]]; then
+		echo "Error: couldn't mount $TARGET_PART to $TARGET_MNT. Err '$?'"
+		return 1
+	fi
+	
+	return 0
+}
+
+### Checks if the installed u-boot is up to date
+# $1 - path to block dev containing u-boot
+# $2 - path to u-boot.imx to compare against
+function need_uboot_update () {
+	DEV=$1
+	FILE=$2
+
+	# verify arguments
+	if [[ ( ! -b "$DEV" ) || ( ! -f "$FILE" ) ]]; then
+		echo "Error: coud not perform u-boot update, invalid dev or file: dev=$DEV, file=$FILE"
+		echo "Error: Halting update!"
+		exit 1
+	fi
+
+	SIZE=$(wc -c < $FILE)
+
+	# Note: skipping 1024 on dev as u-boot is offset in the boot device
+	if cmp -n$SIZE $DEV $FILE 1024; then
+		# if they match, return no need to update
+		return 1
+	fi
+	
+	# otherwise return need to update
+	return 0
+}
+
+### Installs a u-boot update to a block device
+# $1 - path to block dev to install u-boot on
+# $2 - path to u-boot.imx to update from
+function update_uboot () {
+	DEV=$1
+	FILE=$2
+	FORCE_RO="/sys/block/$(basename $DEV)/force_ro"
+
+	# verify arguments
+	if [[ ( ! -b "$DEV" ) || ( ! -f "$FILE" ) || ( ! -f "$FORCE_RO" ) ]]; then
+		echo "Error: could not perform u-boot update, invalid dev or file: dev=$DEV, file=$FILE"
+		echo "Error: could be bad force_ro file: force_ro:$FORCE_RO"
+		echo "Error: Halting update!"
+		exit 1
+	fi
+
+	echo 0 > $FORCE_RO
+
+	if ! dd if=$FILE of=$DEV bs=1k seek=1; then
+		echo "Error: couldn't install u-boot update to $DEV from $FILE. Err '$?'"
+		echo 1 > $FORCE_RO
+		return 1
+	fi
+
+	echo 1 > $FORCE_RO
+
+	return 0
+}
+
+function do_install_cleanup() {
+	echo "Doing cleanup hooks..."
+
+	# if we have a tmpdir, delete it
+	if [[ -d $TMPDIR ]]; then
+		echo "Removing tempdir: $TMPDIR"
+		rm -rf $TMPDIR
+	fi
+
+	# if we didn't unmount the rootfs or boot, do that
+	for MNT in $ROOTFS_MNT $BOOT_MNT; do
+		if mountpoint -q $MNT; then
+			echo "Unmounting $MNT..."
+			umount $MNT
+		fi
+	done
+}
+
+### Set eMMC boot partition
+# $1 - boot partition, either 1 or 2
+#
+# Little explnation of the 8 and 16. We are setting EXT_CSD register 179
+# of the eMMC to select the target boot partition. Here is it's format:
+# +------------------------------------------------------------+
+# | Bit7 | Bit6     | Bit5 Bit4 Bit3        | Bit2 Bit1 Bit0   |
+# |------|----------|-----------------------|------------------|
+# | X    | BOOT_ACK | BOOT_PARTITION_ENABLE | PARTITION_ACCESS |
+# +------------------------------------------------------------+
+# Bit7: Reserved
+# Bit6: always set to vaule '1' when boot_part is enabled
+# Bit[5:3]:
+# 0x0 : Device not boot enabled (default)
+# 0x1 : Boot partition 1 enabled for boot
+# 0x2 : Boot partition 2 enabled for boot
+# 0x7 : User area enabled for boot
+# Bit[2:0]:
+# 0x0 : No access to boot partition (default)
+# 0x1 : R/W boot partition 1
+# 0x2 : R/W boot partition 2
+#
+# The boot_config takes a base 10 integer to set this, so 8 sets bit 3
+# and 16 sets bit 4. Bit 6 will get implicitly set for either of these
+# and bits [7] and [2:0] are left alone
+function set_emmc_boot_partition() {
+	BOOT_PART="$1"
+	if [[ "$BOOT_PART" = "1" ]]; then
+		echo 8 > "/sys/class/mmc_host/mmc1/mmc1:0001/boot_config"
+		echo "Set eMMC bootpart to $BOOT_PART"
+	elif [[ "$BOOT_PART" = "2" ]]; then
+		echo 16 > "/sys/class/mmc_host/mmc1/mmc1:0001/boot_config"
+		echo "Set eMMC bootpart to $BOOT_PART"
+	else
+		echo "Error: Couldn't update target_rootfs..."
+		exit 1
+	fi
+}
+
+# if we booted from eMMC and the eMMC boot partition is pointing at our current
+# rootfs (e.g. we already ran an update with without reooting), point the eMMC
+# back at the current rootfs since we are going to stomp the other
+# $1 - the current ROOTFS device
+function set_emmc_to_current_rootfs() {
+	ROOTFS="$1"
+	BOOT_PART=$(cat "/sys/class/mmc_host/mmc1/mmc1:0001/boot_info" | \
+		grep BOOT_PARTITION | \
+		sed 's/.*BOOT_PARTITION-ENABLE: \([[:digit:]]\+\).*/\1/')
+	if [[ "$ROOTFS" != "$BOOT_PART" ]]; then
+		echo "Warning: Current boot part ($BOOT_PART) not same as current rootfs ($ROOTFS)"
+		echo "Warning: Forcing boot part back to current rootfs during update..."
+		set_emmc_boot_partition "$ROOTFS"
+	fi
+}
+
+function do_install() {
+	TARGET_ROOTFS=""
+	TARGET_ROOTFS_PART=""
+	TARGET_BOOT_PART=""
+	UPDATE_FILE=""
+	DO_HASH="1"
+
+	trap do_install_cleanup EXIT
+
+	### parse the command line args
+	while getopts ":f:h" opt; do
+		case $opt in
+			f)
+				UPDATE_FILE="$OPTARG"
+				;;
+			h)
+				DO_HASH=""
+				;;
+		esac
+	done
+	# verify arguments
+	# update file must not have spaces
+	case "$UPDATE_FILE" in
+		*\ * )
+		echo "Error: update filename must not contain spaces"
+		exit 1
+		;;
+	esac
+
+	if [[ ! -f $UPDATE_FILE ]]; then
+		echo "Error: You must speficiy a valid update file with -f filename"
+		exit 1
+	fi
+
+	# Decide which partioin to install to
+	# check which partition is mounted as root first and use the opposite
+	ROOTFS=$(rdev|cut -d " " -f1)
+	if [[ "$ROOTFS" = "/dev/mmcblk1p3" ]]; then
+		TARGET_ROOTFS="2"
+		set_emmc_to_current_rootfs "1"
+	elif [[ "$ROOTFS" = "/dev/mmcblk1p4" ]]; then
+		TARGET_ROOTFS="1"
+		set_emmc_to_current_rootfs "2"
+	else
+		# we aren't running off either eMMC rootfs (sd or net?)
+		# get the target based on the selected boot part in eMMC
+		BOOT_PART=$(cat "/sys/class/mmc_host/mmc1/mmc1:0001/boot_info" | \
+			grep BOOT_PARTITION | \
+			sed 's/.*BOOT_PARTITION-ENABLE: \([[:digit:]]\+\).*/\1/')
+		case "$BOOT_PART" in
+		"1")
+			TARGET_ROOTFS="2"
+			;;
+		"2")
+			TARGET_ROOTFS="1"
+			;;
+		*)
+			echo "Error: Couldn't determin target rootfs, assuming rootfs1"
+			TARGET_ROOTFS="1"
+			;;
+		esac
+	fi
+
+	# now set the part target vars based on selected rootfs
+	case "$TARGET_ROOTFS" in
+	"1")
+		TARGET_ROOTFS_PART="/dev/mmcblk1p3"
+		TARGET_BOOT_PART="/dev/mmcblk1boot0"
+		;;
+	"2")
+		TARGET_ROOTFS_PART="/dev/mmcblk1p4"
+		TARGET_BOOT_PART="/dev/mmcblk1boot1"
+		;;
+	*)
+		echo "Error: couldn't determine target rootfs"
+		exit 1
+		;;
+	esac
+
+	echo "Selected rootfs ${TARGET_ROOTFS} of 2 for update"
+	echo "    rootfs = ${TARGET_ROOTFS_PART}"
+	echo "    boot   = ${TARGET_BOOT_PART}"
+
+
+	### Create a tep dir to do work in
+	make_tmpdir
+
+	# Verify the update file is good
+	if [[ -n "${DO_HASH}" ]]; then
+		echo "Verifying update file integrity..."
+		if ! verify_update $UPDATE_FILE; then
+			echo "Error: invalid update file"
+			exit 1
+		fi
+	fi
+
+	# unmount the target partition if it's mounted
+	if mount|grep -q $TARGET_ROOTFS_PART; then
+		echo "$TARGET_ROOTFS_PART mounted, unmounting..."
+		if ! umount $TARGET_ROOTFS_PART; then
+			echo "Error: couldn't unmount $TARGET_ROOTFS_PART. Err '$?'"
+			exit 1
+		fi
+	fi
+
+	# format the target partition
+	echo "Formatting partition: $TARGET_ROOTFS_PART"
+	if ! mkfs.ext4 $TARGET_ROOTFS_PART -E nodiscard -q ; then
+		echo "Error: Couldn't format $TARGET_ROOTFS_PART. Err '$?'"
+		exit 1
+	fi
+
+	# mount the target rootfs parittion
+	if ! mount_update "$TARGET_ROOTFS_PART" "$ROOTFS_MNT"; then
+		echo "Error: couldn't mount update partition"
+		exit 1
+	fi
+
+	echo "Extracting and sourcing 'meta' from update..."
+	if ! tar xf $UPDATE_FILE -C $TMPDIR ./meta; then
+		echo "Error: Couldn't extra meta file. Err '$?'"
+		exit 1
+	fi
+	source $TMPDIR/meta
+
+	ROOTFS_EXTRACTED=0
+	echo "Extracting update rootfs to $ROOTFS_MNT..."
+	# loop over possible compression types because tar can't infer type from stdin
+	for COMPFLAG in "z" "j" "J" ""; do
+		echo "Trying compression type '${COMPFLAG}' for rootfs extraction..."
+		if tar xOf $UPDATE_FILE ./$META_ROOTFS_FILE | tar x${COMPFLAG}f - -C $ROOTFS_MNT; then
+			ROOTFS_EXTRACTED=1
+			break
+		fi
+	done
+
+	if [[ $ROOTFS_EXTRACTED -eq 0 ]]; then
+		echo "Error: Couldn't extract rootfs. Invalid archive or unsupported compression."
+		exit 1
+	fi
+
+	# Check if we need to update uboot and do it if so
+	if need_uboot_update $TARGET_BOOT_PART $ROOTFS_MNT/boot/u-boot.imx; then
+		echo "Current u-boot on $TARGET_BOOT_PART is out of date, updating..."
+		if ! update_uboot $TARGET_BOOT_PART $ROOTFS_MNT/boot/u-boot.imx; then
+			echo "Error: couldn't update u-boot on $TARGE_BOOT_PART"
+			echo "Error: Ending update"
+			exit 1
+		else
+			echo "U-boot updated successfully!"
+		fi
+	else
+		echo "Current u-boot on $TARGET_BOOT_PART is up to date."
+	fi
+
+	# Before toggling the eMMC boot we need to sync and unmount the
+	# the parittions. If a power failure happened between setting the eMMC
+	# boot target and unmounting the rootfs might get courrupt and be
+	# pointed to.
+	do_install_cleanup
+
+	# Toggle the eMMC to target the new rootfs and boot
+	echo "Setting boot target to rootfs ${TARGET_ROOTFS} of 2"
+	set_emmc_boot_partition "$TARGET_ROOTFS"
+}
+
+CMD=$1
+shift
+
+case "$CMD" in
+"install")
+	do_install "$@"
+	;;
+*)
+	usage
+esac
+

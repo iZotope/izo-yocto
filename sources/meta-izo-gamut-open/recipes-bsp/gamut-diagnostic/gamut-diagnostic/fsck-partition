@@ -1,0 +1,50 @@
+#!/bin/sh
+# Copyright (C) 2017, iZotope, Inc. All Rights Reserved
+# Released under the BSD-3 license (see COPYING.BSD-3)
+
+usage() {
+	echo ""
+	echo "fsck-partition (-p <partition_number>|-l <partition_label>)"
+	echo ""
+	echo "partition_number: partition number."
+	echo "partition_label: label of the partition."
+}
+
+. /usr/sbin/partition-common.source
+
+if [[ $# -lt 1 ]]; then
+	usage
+	exit 1
+fi
+
+while getopts "l:p:" opt; do
+	case $opt in
+		l)
+			partition_label="$OPTARG"
+			;;
+		p)
+			partition_number="$OPTARG"
+			;;
+	esac
+done
+
+parse_args
+
+echo "fsck-partition: Running fsck on partition ${partition}"
+fsck.ext4 -a $partition
+
+exit_code=$?
+if [[ $exit_code -eq 0 ]]; then
+	echo "fsck-partition: No errors found"
+	exit 0
+elif [[ $exit_code -eq 1 ]]; then
+	echo "fsck-partition: Errors found and corrected"
+	exit 0
+elif [[ $exit_code -eq 4 ]]; then
+	echo "fsck-partition: Errors found and left uncorrected. Partition is corrupted"
+	# TODO: write an error to the error file
+	exit $exit_code
+else
+	echo "fsck-partition: Unknown error"
+	exit $exit_code
+fi

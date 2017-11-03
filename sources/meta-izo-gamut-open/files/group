@@ -1,0 +1,93 @@
+# these are the standard groups from base-password
+# you likely shouldn't touch these
+# Note: doesn't look like we need these at all in this file
+#       Leaving them here commented out for now.
+#root:x:0:
+#daemon:x:1:
+#bin:x:2:
+#sys:x:3:
+#adm:x:4:
+#tty:x:5:
+#disk:x:6:
+#lp:x:7:
+#mail:x:8:
+#news:x:9:
+#uucp:x:10:
+#man:x:12:
+#proxy:x:13:
+#kmem:x:15:
+#input:x:19:
+#dialout:x:20:
+#fax:x:21:
+#voice:x:22:
+#cdrom:x:24:
+#floppy:x:25:
+#tape:x:26:
+#sudo:x:27:
+#audio:x:29:gamut
+#dip:x:30:
+#www-data:x:33:
+#backup:x:34:
+#operator:x:37:
+#list:x:38:
+#irc:x:39:
+#src:x:40:
+#gnats:x:41:
+#shadow:x:42:
+#utmp:x:43:
+#video:x:44:
+#sasl:x:45:
+#plugdev:x:46:
+#staff:x:50:
+#games:x:60:
+#shutdown:x:70:
+#users:x:100:
+#nogroup:x:65534:
+
+# There are the primary groups for users added by recipes
+# note we need an entry for a user added by any recipe we use even if we don't
+# install that package as useradd-staticids does a static analysis of all used
+# recipes.
+# Start these at 1000
+avahi:x:1000:
+sshd:x:1001:
+messagebus:x:1002:
+mpd:x:1003:
+mysql:x:1004:
+polkitd:x:1005:
+zabbix:x:1006:
+dovecot:x:1007:
+ntp:x:1008:
+ftp:x:1009:
+rwhod:x:1010:
+radvd:x:1011:
+squid:x:1012:
+opensaf:x:1013:
+lldpd:x:1014:
+cyrus:x:1015:
+postfix:x:1016:
+ftp:x:1017:
+xuser:x:1018:
+quagga:x:1019:
+systemd-journal-gateway:x:1020:
+distcc:x:1021:
+rpc:x:1022:
+builder:x:1023:
+bind:x:1024:
+ppp:x:1025:
+rpcuser:x:1026:
+avahi-autoipd:x:1027:
+pulse:x:1028:
+
+# these are non-primary groups added by any recipe
+# start at 2000
+lpadmin:x:2000:
+crontab:x:2001:
+netdev:x:2002:
+tracing:x:2003:
+weston-launch:x:2004:
+
+
+# there are the primary user groups, should match the uid in passwd
+# start at 3000
+gamut:x:3000:

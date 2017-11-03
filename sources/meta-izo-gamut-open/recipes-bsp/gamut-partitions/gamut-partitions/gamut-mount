@@ -1,0 +1,82 @@
+#!/bin/sh
+# Copyright (C) 2017, iZotope, Inc. All Rights Reserved
+# Released under the BSD-3 license (see COPYING.BSD-3)
+
+usage() {
+	echo ""
+	echo "gamut-mount (mount|remount-rw|remount-ro|unmount) (-p <partition_number>|-l <partition_label>)"
+	echo ""
+	echo "mount: Mount the partition"
+	echo "remount-rw: Re-mount the partition read-write"
+	echo "remount-r: Re-mount the partition read-only"
+	echo "unmount: Unmount the partition"
+	echo "partition_number: partition number."
+	echo "partition_label: label of the partition."
+}
+
+. /usr/sbin/partition-common.source
+
+mount_cmd=""
+
+if [[ $# -lt 1 ]]; then
+	usage
+	exit 1
+fi
+
+mount_cmd=$1
+shift
+
+while getopts "l:p:" opt; do
+	case $opt in
+		l)
+			partition_label="$OPTARG"
+			;;
+		p)
+			partition_number="$OPTARG"
+			;;
+	esac
+done
+
+parse_args
+
+mountpt=$(jq -r .config.partitions[$partition_index].mountpoint $partition_config)
+if [[ "$mountpt" == "null" ]]; then
+	echo "Could not find mountpoint for partition $partition_number";
+	exit 1
+fi
+
+default_write_access=$(jq -r .config.partitions[$partition_index].default_write_access $partition_config)
+if [[ "$default_rw" == "null" ]]; then
+	# default to read only
+	default_write_access="ro"
+fi
+
+case "$mount_cmd" in
+"mount")
+	if ! mount -o $default_write_access $partition $mountpt; then
+		echo "Could not mount partition $partition_number onto $mountpt."
+		exit 1
+	fi
+	;;
+"remount-rw")
+	if ! mount -o remount,rw $partition; then
+		echo "Could not remount partition $partition_number."
+		exit 1
+	fi
+	;;
+"remount-ro")
+	if ! mount -o remount,ro $partition; then
+		echo "Could not remount partition $partition_number."
+		exit 1
+	fi
+	;;
+"unmount")
+	if ! umount $partition; then
+		echo "Could not unmount partition $partition_number."
+		exit 1
+	fi
+	;;
+*)
+	usage
+	exit 1
+esac

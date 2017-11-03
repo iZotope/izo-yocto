@@ -1,0 +1,35 @@
+# Describes the GPIOs to setup on the system
+# num : the Linux GPIO number id
+# name : a descriptive name for the pin, no spaces, valid file name
+# group : a group to set permissions to. Blank leaves as default (usually root)
+# polarity : the active polarity of the pin, eierhter 'active_low' or 'active_high'
+# export : set to 'export' to have the pin exported in the init script, empty to ignore
+#
+# Top row must be left unmodified
+num, name,                    group,    polarity,    export
+28,  headphone_mute,          ,         active_low,  export
+29,  codec_reset,             ,         active_low,  
+30,  codec_power_enable,      ,         active_high, export
+31,  audio_power_en,          ,         active_high, export
+32,  that_pga_reset,          ,         active_low,  
+33,  front_headphone_in_use,  gamut,    active_low,  export
+34,  rear_headphone_in_use,   gamut,    active_low,  export
+35,  lch_trs_plugged_in,      gamut,    active_low,  export
+36,  lch_xlr_plugged_in,      gamut,    active_low,  export
+37,  rch_trs_plugged_in,      gamut,    active_low,  export
+38,  rch_xlr_plugged_in,      gamut,    active_low,  export
+39,  phantom_sw_on,           gamut,    active_high, export
+40,  rch_ovfl_zero,           ,         active_high, export
+41,  lch_ovfl_zero,           ,         active_high, export
+42,  audio_power_ok,          ,         active_high, export
+48,  atmel_swd_clk,           ,         active_high, export
+49,  atmel_swd_data,          ,         active_high, export
+50,  atmel_reset,             gamut,    active_high, export
+504, mic_gain_b0,             ,         active_high,  
+505, mic_gain_b1,             ,         active_high,  
+506, mic_gain_b2,             ,         active_high,  
+507, mic_gain_b3,             ,         active_high,  
+508, mic_gain_b4,             ,         active_high,  
+509, mic_gain_b5,             ,         active_high,  
+510, mclk_sel0,               ,         active_high,  export
+511, mclk_sel1,               ,         active_high,  export

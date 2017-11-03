@@ -1,0 +1,103 @@
+#!/bin/bash
+# Copyright (C) 2017, iZotope, Inc. All Rights Reserved
+# Released under the BSD-3 license (see COPYING.BSD-3)
+
+# to create the partitions programatically (rather than manually)
+# we're going to simulate the manual input to fdisk
+# The sed script strips off all the comments so that we can
+# document what we're doing in-line with the actual commands
+# Note that a blank line (commented as "default" will send a empty
+# line terminated with a newline to take the fdisk default.
+exe() { echo "\$ $@" ; "$@" ; }
+
+usage() {
+	echo "gamut-mkparts <device> <config_file> <config> <partitions>"
+	echo ""
+	echo "device: Storage device to create the partitions on"
+	echo "config_file: .json file containing the partition configuration"
+	echo "config: partition configuration to use. Either 'dev' or 'prd'"
+	echo "partitions: Set of partitions to create (1-indexed), e.g. 1 2 3 5 will create partitions 1, 2, 3, and 5"
+}
+
+device=$1
+if [[ ! -b "${device}" ]]; then
+	echo "ERROR: You must pass the target device as an argument"
+	usage
+	exit 1
+fi
+
+config_file=$2
+if [[ ! -e "${config_file}" ]]; then
+	echo "ERROR: You must specify a partition configuration file"
+	echo ""
+	usage
+	exit 1
+fi
+
+config=$3
+if [ $# -lt 3 ]; then
+	echo "ERROR: You must specify a partition configuration"
+	echo ""
+	usage
+	exit 1
+fi
+
+if [ $# -lt 4 ]; then
+	echo "ERROR: You must the set of partitions you want to create."
+	echo "Specify the partitions as an ordered list, e.g. 1 2 3 5 will create partitions 1, 2, 3, and 5."
+	echo ""
+	usage
+	exit 1
+fi
+
+script_add () {
+	SCRIPT="${SCRIPT}"$'\t'"${1}"$'\n'
+}
+
+validate () {
+	if !(echo "$1"| grep -Eq '^[0-9]+[KMGT]?$'); then
+		echo "ERROR: Couldn't parse size '$1'"
+		exit 1g
+	fi
+}
+
+SCRIPT=""
+script_add "g   # make an empty GPT partition table"
+for partition_number in "${@:4}"; do
+	let partition_index=$partition_number-1
+	partition_size=$(jq -r .config.partitions[$partition_index].size.$config $config_file)
+	if [ "$partition_size" == "r" ]; then
+		script_add "n   # new partition"
+		script_add "$partition_number   # partition $partition_number"
+		script_add "    # default start"
+		script_add "    # remaining space for paritition $partition_number"
+	else
+		validate $partition_size
+		script_add "n   #new partition"
+		script_add "$partition_number   # partition $partition_number"
+		script_add "    # default start"
+		script_add "+$partition_size # size for paritition $partition_number"
+	fi
+done
+script_add "p   # print out the partition table"
+script_add "w   # save it to disk"
+script_add "q   # quit, were done"
+
+echo "Running the following fdisk script"
+echo "$SCRIPT"
+echo
+#| fdisk ${device}
+echo "${SCRIPT}" | sed -e 's/\t\([\+0-9a-zA-Z]*\)[ \t].*/\1/' - | fdisk ${device}
+
+if [ $? -ne 0 ]; then
+	echo "ERROR: failed to run fdisk properly"
+	exit 1
+fi
+
+
+for partition_number in "${@:4}"; do
+	let partition_index=$partition_number-1
+	label=$(jq -r .config.partitions[$partition_index].label $config_file)
+	extra_format_args=$(jq -r .config.partitions[$partition_index].extra_format_args $config_file)
+	mkfs.ext4 -L $label $extra_format_args ${device}p${partition_number}
+done

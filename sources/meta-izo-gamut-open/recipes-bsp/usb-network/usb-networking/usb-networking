@@ -1,0 +1,41 @@
+#!/usr/bin/lua
+
+local utils = require 'izo.utils'
+
+local function run(cmd)
+	ret,output = utils.run(cmd)
+	print("*** Ran command "..cmd)
+	print("    ret "..ret)
+	print(output)
+	print()
+end
+
+-- check if we should use the ip stored in the SRC memory
+local ret,output = utils.run("devmem2  0x020d8028 w")
+local ip = {}
+_,_,ip[1],ip[2],ip[3],ip[4] = output:find("Read at address%s+0x%x%x%x%x%x%x%x%x.-: 0x(%x%x)(%x%x)(%x%x)(%x%x)")
+
+local ipaddr = ""
+for i,d in ipairs(ip) do
+	ipaddr = ipaddr..tonumber(d,16)
+	if i ~= 4 then
+		ipaddr = ipaddr.."."
+	end
+end
+
+print("Read ip address from memory: "..ipaddr)
+if ipaddr == "0.0.0.0" or ret ~= 0 then
+	print("Invalid ipaddress, using default")
+	ipaddr = "192.168.50.1"
+end
+print("Using ipaddress: "..ipaddr)
+
+-- enable the USB port
+run('modprobe g_zero')
+run('modprobe g_ether')
+run('ifconfig usb0 up')
+run('ifconfig usb0 '..ipaddr)
+
+-- also enable the FEC ethernet
+run('ifconfig eth0 up')
+run('ifconfig eth0 192.168.51.1')

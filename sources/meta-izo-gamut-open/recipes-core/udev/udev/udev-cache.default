@@ -1,0 +1,7 @@
+# Default for /etc/init.d/udev
+
+# Comment this out to disable device cache
+# Disable devcache to work around chaning blkdev minor numbers chaning
+# depending on if there is an sdcard in at boot or not
+DEVCACHE=""
+PROBE_PLATFORM_BUS="yes"

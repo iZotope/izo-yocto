@@ -1,0 +1,13 @@
+diff --git a/meta/recipes-connectivity/openssh/openssh/init b/meta/recipes-connectivity/openssh/openssh/init
+index 70d4a34..1f63725 100644
+--- a/init
++++ b/init
+@@ -41,7 +41,7 @@ check_privsep_dir() {
+ }
+ 
+ check_config() {
+-	/usr/sbin/sshd -t || exit 1
++	/usr/sbin/sshd -t $SSHD_OPTS || exit 1
+ }
+ 
+ check_keys() {

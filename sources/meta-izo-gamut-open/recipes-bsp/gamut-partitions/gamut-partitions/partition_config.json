@@ -1,0 +1,72 @@
+{
+	"config": {
+		"partitions": [
+			{
+				"label": "rcv",
+				"size": {
+					"dev": "64M",
+					"prd": "64M"
+				},
+				"extra_format_args": "-E nodiscard -j -b 1024 -J size=1",
+				"mountpoint": "/recovery",
+				"default_write_access": "ro"
+			},
+			{
+				"label": "serial",
+				"size": {
+					"dev": "64M",
+					"prd": "64M"
+				},
+				"extra_format_args": "-E nodiscard -j -b 1024 -J size=1",
+				"mountpoint": "/serial",
+				"default_write_access": "ro"
+			},
+			{
+				"label": "rootfs1",
+				"size": {
+					"dev": "512M",
+					"prd": "128M"
+				},
+				"extra_format_args": "-E nodiscard -j"
+			},
+			{
+				"label": "rootfs2",
+				"size": {
+					"dev": "512M",
+					"prd": "128M"
+				},
+				"extra_format_args": "-E nodiscard -j"
+			},
+			{
+				"label": "firmware",
+				"size": {
+					"dev": "512M",
+					"prd": "128M"
+				},
+				"extra_format_args": "-E nodiscard -j -m 0",
+				"mountpoint": "/data/Firmware",
+				"default_write_access": "rw"
+			},
+			{
+				"label": "system",
+				"size": {
+					"dev": "64M",
+					"prd": "64M"
+				},
+				"extra_format_args": "-E nodiscard -j -m 0",
+				"mountpoint": "/data/nonvolatile",
+				"default_write_access": "rw"
+			},
+			{
+				"label": "data",
+				"size": {
+					"dev": "r",
+					"prd": "r"
+				},
+				"extra_format_args": "-E nodiscard -j -m 0",
+				"mountpoint": "/data/Gamut",
+				"default_write_access": "rw"
+			}
+		]
+	}
+}

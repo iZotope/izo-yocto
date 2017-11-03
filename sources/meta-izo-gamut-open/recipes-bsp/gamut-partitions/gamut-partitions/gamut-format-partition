@@ -1,0 +1,61 @@
+#!/bin/bash
+# Copyright (C) 2017, iZotope, Inc. All Rights Reserved
+# Released under the BSD-3 license (see COPYING.BSD-3)
+
+usage() {
+	echo ""
+	echo "gamut-reformat-partition [-u] (-p <partition_number>|-l <partition_label>)"
+	echo ""
+	echo "-u: Unmount the partition before reformatting. Reformatting will fail if partition is mounted."
+	echo "partition_number: partition number."
+	echo "partition_label: label of the partition."
+}
+
+. /usr/sbin/partition-common.source
+
+unmount=""
+
+while getopts "ul:p:" opt; do
+	case $opt in
+		u)
+			unmount="1"
+			;;
+		l)
+			partition_label="$OPTARG"
+			;;
+		p)
+			partition_number="$OPTARG"
+			;;
+	esac
+done
+
+parse_args
+
+if mount | grep -q "${partition}"; then
+	if [[ -n "${unmount}" ]]; then
+		echo "${partition} mounted. Unmounting."
+		if ! umount $partition; then
+			echo "Could not unmount ${partition}. Can't reformat"
+			exit 1
+		fi
+	else
+		echo "${partition} is mounted, and arguments did not specify to unmount. Can't reformat."
+		exit 1
+	fi
+fi
+
+label=$(jq -r .config.partitions[$partition_index].label $partition_config)
+extra_format_args=$(jq -r .config.partitions[$partition_index].extra_format_args $partition_config)
+
+if [[ $label == "null" || $extra_format_args == "null" ]]; then
+	echo "Partition not found in configuration"
+	exit 1
+fi
+
+echo "Reformatting partition ${partition}..."
+if ! mkfs.ext4 -L $label $extra_format_args -q $partition; then
+	echo "Error: Couldn't format ${partition}. Error '$?'"
+	exit 1
+fi
+
+echo "Done"

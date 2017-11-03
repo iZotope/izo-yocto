@@ -1,0 +1,44 @@
+#!/bin/sh
+# Copyright (C) 2017, iZotope, Inc. All Rights Reserved
+# Released under the BSD-3 license (see COPYING.BSD-3)
+
+partition=""
+partition_number=""
+partition_index=""
+partition_label=""
+partition_config=/etc/partition_config.json
+
+parse_args() {
+	if [[ ! -e $partition_config ]]; then
+		echo "$partition_config not found."
+		return 1
+	fi
+
+	if [[ -n "$partition_number" && -n "$partition_label" ]]; then
+		echo "Cannot specify both partition number and partition label"
+		exit 1
+	fi
+
+	if [[ -z "$partition_number" && -z "$partition_label" ]]; then
+		echo "Must specify either partition number or partition label"
+		exit 1
+	fi
+
+	if [[ -n "$partition_label" ]]; then
+		partition_index=$(jq -r ".config.partitions | map(.label) | indices(\"$partition_label\") | .[0]" $partition_config)
+		if [[ "$partition_index" == "null" ]]; then
+			echo "Could not find partition with label ${partition_label}"
+			exit 1
+		fi
+
+		let partition_number=partition_index+1
+	else
+		let partition_index=partition_number-1
+	fi
+
+	partition=/dev/mmcblk1p${partition_number}
+	if [[ ! -b "$partition" ]]; then
+		echo "Partition ${partition} not found on disk"
+		exit 1
+	fi
+}

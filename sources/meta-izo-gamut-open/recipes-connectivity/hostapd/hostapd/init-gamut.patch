@@ -1,0 +1,19 @@
+--- a/init	2016-06-16 17:10:35.794527741 -0400
++++ b/init	2016-06-16 17:13:49.288060812 -0400
+@@ -2,7 +2,15 @@
+ DAEMON=/usr/sbin/hostapd
+ NAME=hostapd
+ DESC="HOSTAP Daemon"
+-ARGS="/etc/hostapd.conf -B"
++CONFDIR="/tmp/etc"
++CONFFILE="$CONFDIR/hostapd.conf"
++ARGS="$CONFFILE -B"
++
++# If the conf file isn't in /tmp copy over the original
++if [ ! -f $CONFFILE ]; then
++	mkdir -p $CONFDIR
++	cp /etc/hostapd.conf $CONFFILE
++fi
+ 
+ test -f $DAEMON || exit 0
+ 

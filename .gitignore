@@ -1,0 +1,13 @@
+# build directories
+/build*/
+/*-build/
+# downloads
+/downloads/
+# tmp text swap files
+*~
+
+# Temp firmware directory
+firmware_deploy_scripts/temp_fw
+
+# Imbuzi checkout location
+/modules/

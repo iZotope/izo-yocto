@@ -1,0 +1,10 @@
+echo "running the boot script"
+set bootargs console=ttymxc0,${baudrate} root=/dev/mmcblk${rootfs_dev}p${rootfs_part} rootwait rw
+addr_dtb=0x88000000
+name_image="/boot/zImage"
+name_dtb="/boot/gamut-r1.dtb"
+ext4load mmc ${rootfs_dev}:${rootfs_part} ${loadaddr} ${name_image} || exit 1
+ext4load mmc ${rootfs_dev}:${rootfs_part} ${addr_dtb} ${name_dtb} || exit 1
+bootz ${loadaddr} - ${addr_dtb}
+echo "Error: failed to boot for some reason"
+exit 1
